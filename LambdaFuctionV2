@@ -1,0 +1,76 @@
+import boto3
+import requests
+from datetime import datetime
+import os
+
+# Initialize Amazon Lex client
+client = boto3.client('lex-runtime', region_name='ap-southeast-2')  # Replace with your region
+
+# OpenWeatherMap API endpoint
+weather_endpoint = 'https://api.openweathermap.org/data/2.5/forecast'
+
+
+def get_weather_forecast(city):
+    api_key = os.getenv('API_KEY')
+    # Send a request to OpenWeatherMap API
+    response = requests.get(weather_endpoint, params={'q': city, 'appid': api_key, 'units': 'metric'})
+    weather_data = response.json()
+
+    if response.status_code == 200:
+        forecast = []
+
+        # Extract forecast information for the next 5 days at 12:00 PM
+        for entry in weather_data['list']:
+            forecast_datetime = datetime.strptime(entry['dt_txt'], '%Y-%m-%d %H:%M:%S')
+            if forecast_datetime.hour == 12:  # Check if the forecast time is 12:00 PM
+                date = entry['dt_txt'].split()[0]  # Extract only the date
+                temperature = entry['main']['temp']
+                humidity = entry['main']['humidity']
+                description = entry['weather'][0]['description']
+                forecast.append(
+                    {'date': date, 'temperature': temperature, 'humidity': humidity, 'description': description})
+
+        return forecast[:5]  # Return only the next 5 days' forecast
+    else:
+        return None
+
+
+def lambda_handler(event, context):
+    # Retrieve user input from the event
+    user_message = event['inputTranscript']
+
+    # Send the user input to Amazon Lex for processing
+    response = client.post_text(
+        botName='YourBotName',
+        botAlias='YourBotAlias',
+        userId='YourUserId',
+        inputText=user_message
+    )
+
+    # Retrieve the response from Amazon Lex
+    lex_response = response['message']
+
+    # If the intent is for weather forecast, extract the city and get the weather forecast
+    if response['intentName'] == 'GetWeatherForecast':
+        city = response['slots']['City']
+        forecast = get_weather_forecast(city)
+
+        if forecast:
+            response_message = f"The 5-day weather forecast for {city} is as follows:\n\n"
+            for day in forecast:
+                response_message += f"Date: {day['date']}, Temperature: {day['temperature']}°C, Humidity: {day['humidity']}%, Description: {day['description']}\n"
+
+            return {
+                'statusCode': 200,
+                'message': response_message
+            }
+        else:
+            return {
+                'statusCode': 200,
+                'message': 'Sorry, I could not retrieve the weather forecast.'
+            }
+
+    return {
+        'statusCode': 200,
+        'message': lex_response
+    }
